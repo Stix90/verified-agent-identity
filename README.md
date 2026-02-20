@@ -6,6 +6,24 @@ A decentralized identity management toolkit for AI agents using iden3 protocol o
 
 This skill enables AI agents to create, manage, prove and verify ownership of decentralized identities (DIDs) using cryptographic signatures.
 
+## Installation
+
+OpenClaw CLI:
+
+```bash
+npx clawhub@latest verified-agent-identity
+```
+
+Or just ask your agent to install it:
+
+```plaintext
+Install the skill `npx clawhub@latest verified-agent-identity`
+```
+
+```plaintext
+Install the `verified-agent-identity` skill from the OpenClaw marketplace.
+```
+
 ## Features
 
 - **Identity Creation**: Generate new DIDs with random or existing Ethereum private keys
