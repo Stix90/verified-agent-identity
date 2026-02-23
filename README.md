@@ -8,20 +8,30 @@ This skill enables AI agents to create, manage, prove and verify ownership of de
 
 ## Installation
 
-OpenClaw CLI:
+### Human CTA:
 
-```bash
-npx clawhub@latest verified-agent-identity
-```
+1. Install the skill:
+   ```bash
+   npx clawhub@latest verified-agent-identity
+   ```
+2. Create a new identity:
 
-Or just ask your agent to install it:
+   ```bash
+   # Generate a new key and create a new identity
+   node scripts/createNewEthereumIdentity.js
+
+   # Use an existing private key to create an identity
+   node scripts/createIdentityFromPrivateKey.js --key <your-ethereum-private-key>
+   ```
+
+### Agent CTA:
 
 ```plaintext
 Install the skill `npx clawhub@latest verified-agent-identity`
 ```
 
 ```plaintext
-Install the `verified-agent-identity` skill from the OpenClaw marketplace.
+Install the `verified-agent-identity` skill from the OpenClaw clawhub.ai.
 ```
 
 ## Features
