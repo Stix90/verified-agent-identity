@@ -14,43 +14,45 @@ function deriveAesKey(masterKeyString) {
   return crypto.createHash("sha256").update(masterKeyString, "utf8").digest();
 }
 
-function encryptKeys(keysArray, masterKeyString) {
+function encryptKey(keyHex, masterKeyString) {
   const aesKey = deriveAesKey(masterKeyString);
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv(ALGORITHM, aesKey, iv, {
     authTagLength: TAG_BYTES,
   });
 
-  const plain = JSON.stringify(keysArray);
   const encrypted = Buffer.concat([
-    cipher.update(plain, "utf8"),
+    cipher.update(keyHex, "utf8"),
     cipher.final(),
   ]);
   const authTag = cipher.getAuthTag();
 
-  return {
-    version: 1,
-    encrypted: true,
-    iv: iv.toString("hex"),
-    authTag: authTag.toString("hex"),
-    data: encrypted.toString("hex"),
-  };
+  return [
+    iv.toString("hex"),
+    authTag.toString("hex"),
+    encrypted.toString("hex"),
+  ].join(":");
 }
 
-function decryptKeys(envelope, masterKeyString) {
+function decryptKey(encryptedPayload, masterKeyString) {
+  const parts = encryptedPayload.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted key format in kms.json");
+  }
+  const [ivHex, authTagHex, ciphertextHex] = parts;
+
   const aesKey = deriveAesKey(masterKeyString);
-  const iv = Buffer.from(envelope.iv, "hex");
-  const authTag = Buffer.from(envelope.authTag, "hex");
-  const ciphertext = Buffer.from(envelope.data, "hex");
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const ciphertext = Buffer.from(ciphertextHex, "hex");
 
   const decipher = crypto.createDecipheriv(ALGORITHM, aesKey, iv, {
     authTagLength: TAG_BYTES,
   });
   decipher.setAuthTag(authTag);
 
-  let decrypted;
   try {
-    decrypted = Buffer.concat([
+    return Buffer.concat([
       decipher.update(ciphertext),
       decipher.final(),
     ]).toString("utf8");
@@ -59,8 +61,6 @@ function decryptKeys(envelope, masterKeyString) {
       "kms.json decryption failed: wrong BILLIONS_NETWORK_MASTER_KMS_KEY or file has been tampered with",
     );
   }
-
-  return JSON.parse(decrypted);
 }
 
-module.exports = { getMasterKey, encryptKeys, decryptKeys };
+module.exports = { getMasterKey, encryptKey, decryptKey };

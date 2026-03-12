@@ -92,7 +92,7 @@ All cryptographic material is persisted to `$HOME/.openclaw/billions/` — a dir
 
 | File               | Contents                                                                           |
 | ------------------ | ---------------------------------------------------------------------------------- |
-| `kms.json`         | Private keys — plain text by default, AES-256-GCM encrypted when master key is set |
+| `kms.json`         | Private keys — per-entry versioned format; keys are plain or AES-256-GCM encrypted |
 | `identities.json`  | Identity metadata                                                                  |
 | `defaultDid.json`  | Active DID and associated public key                                               |
 | `challenges.json`  | Per-DID challenge history                                                          |
@@ -102,16 +102,43 @@ Private keys are stored in plain text by default. To protect them at rest, enabl
 
 ### KMS Encryption
 
-Set the environment variable `BILLIONS_NETWORK_MASTER_KMS_KEY` to enable AES-256-GCM at-rest encryption for `kms.json`. When the variable is set, every write to the key store is encrypted; when it is absent the store keeps all in plain JSON (backward-compatible with all existing files).
+Set the environment variable `BILLIONS_NETWORK_MASTER_KMS_KEY` to enable AES-256-GCM at-rest encryption for the private keys inside `kms.json`. When set, every key value is individually encrypted on write; when absent, keys are stored as plain hex strings.
+
+**`kms.json` entry format**
+
+Each entry in the array is versioned. The `alias` is always stored in plain text — only the `key` value is encrypted:
+
+```json
+[
+  {
+    "version": 1,
+    "provider": "plain",
+    "data": {
+      "alias": "secp256k1:abc123",
+      "key": "deadbeef...",
+      "createdAt": "2026-03-12T13:46:04.094Z"
+    }
+  },
+  {
+    "version": 1,
+    "provider": "encrypted",
+    "data": {
+      "alias": "secp256k1:xyz456",
+      "key": "<iv_hex>:<authTag_hex>:<ciphertext_hex>",
+      "createdAt": "2026-02-11T13:00:02.032Z"
+    }
+  }
+]
+```
 
 **Behaviour summary**
 
-| `BILLIONS_NETWORK_MASTER_KMS_KEY` | `kms.json` on disk              |
-| --------------------------------- | ------------------------------- |
-| Not set                           | Plain JSON (legacy format kept) |
-| Set                               | AES-256-GCM encrypted envelope  |
+| `BILLIONS_NETWORK_MASTER_KMS_KEY` | `provider` on disk | `key` value on disk     |
+| --------------------------------- | ------------------ | ----------------------- |
+| Not set                           | `"plain"`          | Raw hex string          |
+| Set                               | `"encrypted"`      | `iv:authTag:ciphertext` |
 
-> **Backward compatibility** — existing plain-text `kms.json` files are read without a master key. On the first write after the variable is set the file is automatically re-encrypted. No manual migration step is required.
+> **Backward compatibility** — the legacy format `[ { "alias": "...", "privateKeyHex": "..." } ]` is still read correctly. On the first write the file is automatically migrated to the new per-entry format. No manual step is required.
 
 **How to set the variable**
 

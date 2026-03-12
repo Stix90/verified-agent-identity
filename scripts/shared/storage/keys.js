@@ -1,52 +1,80 @@
 const { FileStorage } = require("./base");
-const { getMasterKey, encryptKeys, decryptKeys } = require("./crypto");
+const { getMasterKey, encryptKey, decryptKey } = require("./crypto");
 
 /**
  * File-based storage for cryptographic keys.
  * Implements AbstractPrivateKeyStore interface from js-sdk.
- * Stores keys in JSON or encrypted format as an array of {alias, privateKeyHex} objects.
+ * Stores keys in JSON format as an array of per-entry versioned objects.
  */
 class KeysFileStorage extends FileStorage {
   constructor(filename = "kms.json") {
     super(filename);
+    // Holds raw on-disk entries that could not be decoded in this session
+    // (e.g. encrypted entries when the master key env var is absent).
+    // They are round-tripped untouched through writeFile so no data is lost.
+    this._opaqueEntries = [];
+  }
+
+  _decodeEntry(entry) {
+    // Legacy format
+    if (Object.prototype.hasOwnProperty.call(entry, "privateKeyHex")) {
+      return { alias: entry.alias, privateKeyHex: entry.privateKeyHex };
+    }
+
+    if (entry.version === 1) {
+      const { alias, key } = entry.data;
+
+      const { createdAt } = entry.data;
+
+      if (entry.provider === "plain") {
+        return { alias, privateKeyHex: key, createdAt };
+      }
+
+      if (entry.provider === "encrypted") {
+        const masterKey = getMasterKey();
+        if (!masterKey) {
+          return { alias, _opaque: true, _raw: entry };
+        }
+        return { alias, privateKeyHex: decryptKey(key, masterKey), createdAt };
+      }
+    }
+
+    throw new Error(
+      `Unrecognised kms.json entry format: ${entry.alias || entry.data.alias || "unknown alias"}}`,
+    );
+  }
+
+  _encodeEntry({ alias, privateKeyHex, createdAt }) {
+    const masterKey = getMasterKey();
+    if (masterKey) {
+      return {
+        version: 1,
+        provider: "encrypted",
+        data: { alias, key: encryptKey(privateKeyHex, masterKey), createdAt },
+      };
+    }
+    return {
+      version: 1,
+      provider: "plain",
+      data: { alias, key: privateKeyHex, createdAt },
+    };
   }
 
   async readFile() {
     const raw = await super.readFile();
-
-    // Legacy format
-    if (Array.isArray(raw)) {
-      return raw;
+    if (!Array.isArray(raw)) {
+      throw new Error("kms.json root must be an array");
     }
-
-    if (raw && raw.version === 1) {
-      if (!raw.encrypted) {
-        // Unencrypted versioned format
-        return Array.isArray(raw.keys) ? raw.keys : [];
-      }
-
-      // Encrypted versioned format
-      const masterKey = getMasterKey();
-      if (!masterKey) {
-        throw new Error(
-          "kms.json is encrypted but BILLIONS_NETWORK_MASTER_KMS_KEY is not set. " +
-            "Set the environment variable to decrypt the key store.",
-        );
-      }
-      return decryptKeys(raw, masterKey);
-    }
-
-    throw new Error("Invalid kms.json format");
+    const decoded = raw.map((entry) => this._decodeEntry(entry));
+    // Stash raw on-disk objects for entries we cannot decode right now so
+    // writeFile can round-trip them untouched.
+    this._opaqueEntries = decoded.filter((e) => e._opaque).map((e) => e._raw);
+    return decoded.filter((e) => !e._opaque);
   }
 
   async writeFile(keys) {
-    const masterKey = getMasterKey();
-
-    const payload = masterKey
-      ? encryptKeys(keys, masterKey)
-      : { version: 1, encrypted: false, keys };
-
-    await super.writeFile(payload);
+    const encoded = keys.map((entry) => this._encodeEntry(entry));
+    await super.writeFile([...encoded, ...this._opaqueEntries]);
   }
 
   async importKey(args) {
@@ -56,8 +84,17 @@ class KeysFileStorage extends FileStorage {
     if (index >= 0) {
       keys[index].privateKeyHex = args.key;
     } else {
-      keys.push({ alias: args.alias, privateKeyHex: args.key });
+      keys.push({
+        alias: args.alias,
+        privateKeyHex: args.key,
+        createdAt: new Date().toISOString(),
+      });
     }
+
+    // update key under alias
+    this._opaqueEntries = this._opaqueEntries.filter(
+      (raw) => raw.data?.alias !== args.alias,
+    );
 
     await this.writeFile(keys);
   }
